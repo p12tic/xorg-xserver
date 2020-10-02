@@ -3987,6 +3987,15 @@ CheckPassiveGrabsOnWindow(WindowPtr pWin,
     return grab;
 }
 
+int FindFirstDescendandInSpriteTrace(DeviceIntPtr dev, WindowPtr ancestor)
+{
+    int i = 0;
+    while (i < dev->spriteInfo->sprite->spriteTraceGood)
+        if (dev->spriteInfo->sprite->spriteTrace[i++] == ancestor)
+            break;
+    return i;
+}
+
 /**
  * CheckDeviceGrabs handles both keyboard and pointer events that may cause
  * a passive grab to be activated.
@@ -4034,9 +4043,7 @@ CheckDeviceGrabs(DeviceIntPtr device, DeviceEvent *event, WindowPtr ancestor)
 
     i = 0;
     if (ancestor) {
-        while (i < device->spriteInfo->sprite->spriteTraceGood)
-            if (device->spriteInfo->sprite->spriteTrace[i++] == ancestor)
-                break;
+        i = FindFirstDescendandInSpriteTrace(device, ancestor);
         if (i == device->spriteInfo->sprite->spriteTraceGood)
             goto out;
     }

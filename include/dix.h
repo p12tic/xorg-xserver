@@ -439,6 +439,9 @@ UpdateSpriteForScreen(DeviceIntPtr /* pDev */ ,
 extern _X_EXPORT void
 WindowHasNewCursor(WindowPtr /* pWin */ );
 
+extern int
+FindFirstDescendandInSpriteTrace(DeviceIntPtr dev, WindowPtr ancestor);
+
 extern Bool
 CheckDeviceGrabs(DeviceIntPtr /* device */ ,
                  DeviceEvent * /* event */ ,
