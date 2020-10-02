@@ -82,6 +82,10 @@ SOFTWARE.
 #define TOUCH_POINTER_EMULATED  (1 << 5)        /* touch event may be pointer emulated */
 #define TOUCH_END               (1 << 6)        /* really end this touch now */
 
+/* GetGestureEvent flags */
+#define GESTURE_REJECT          (1 << 0)
+#define GESTURE_CANCELLED       (1 << 1)
+
 /*int constants for pointer acceleration schemes*/
 #define PtrAccelNoOp            0
 #define PtrAccelPredictable     1
