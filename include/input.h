@@ -131,7 +131,9 @@ typedef struct _ValuatorClassRec *ValuatorClassPtr;
 typedef struct _ClassesRec *ClassesPtr;
 typedef struct _SpriteRec *SpritePtr;
 typedef struct _TouchClassRec *TouchClassPtr;
+typedef struct _GestureClassRec *GestureClassPtr;
 typedef struct _TouchPointInfo *TouchPointInfoPtr;
+typedef struct _GestureInfo *GestureInfoPtr;
 typedef struct _DDXTouchPointInfo *DDXTouchPointInfoPtr;
 typedef union _GrabMask GrabMask;
 
@@ -317,6 +319,9 @@ extern _X_EXPORT Bool InitTouchClassDeviceStruct(DeviceIntPtr /*device */ ,
                                                  unsigned int /*max_touches */ ,
                                                  unsigned int /*mode */ ,
                                                  unsigned int /*numAxes */ );
+
+extern _X_EXPORT Bool InitGestureClassDeviceStruct(DeviceIntPtr device,
+                                                   unsigned int max_touches);
 
 typedef void (*BellProcPtr) (int percent,
                              DeviceIntPtr device,
@@ -556,6 +561,12 @@ enum TouchListenerType {
     TOUCH_LISTENER_POINTER_REGULAR,
 };
 
+enum GestureListenerType {
+    GESTURE_LISTENER_GRAB,
+    GESTURE_LISTENER_POINTER_GRAB,
+    GESTURE_LISTENER_REGULAR
+};
+
 extern void TouchInitDDXTouchPoint(DeviceIntPtr dev,
                                    DDXTouchPointInfoPtr ddxtouch);
 extern DDXTouchPointInfoPtr TouchBeginDDXTouch(DeviceIntPtr dev,
@@ -601,6 +612,7 @@ extern void TouchEndPhysicallyActiveTouches(DeviceIntPtr dev);
 extern void TouchEmitTouchEnd(DeviceIntPtr dev, TouchPointInfoPtr ti, int flags, XID resource);
 extern void TouchAcceptAndEnd(DeviceIntPtr dev, int touchid);
 
+extern Bool GestureInitGestureInfo(GestureInfoPtr gesture, int type);
 /* misc event helpers */
 extern Mask GetEventMask(DeviceIntPtr dev, xEvent *ev, InputClientsPtr clients);
 extern Mask GetEventFilter(DeviceIntPtr dev, xEvent *event);

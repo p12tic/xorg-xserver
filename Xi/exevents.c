@@ -691,6 +691,26 @@ DeepCopyPointerClasses(DeviceIntPtr from, DeviceIntPtr to)
     /* Don't remove touch class if from->touch is non-existent. The to device
      * may have an active touch grab, so we need to keep the touch class record
      * around. */
+
+    if (from->gesture) {
+        if (!to->gesture) {
+            classes = to->unused_classes;
+            to->gesture = classes->gesture;
+            if (!to->gesture) {
+                if (!InitGestureClassDeviceStruct(to, from->gesture->max_touches))
+                    FatalError("[Xi] no memory for class shift.\n");
+            }
+            else
+                classes->gesture = NULL;
+        }
+
+        to->gesture->sourceid = from->gesture->sourceid;
+        /* to->gestures and to->num_gestures are separate
+         * on the master,  don't copy */
+    }
+    /* Don't remove gesture class if from->gesture is non-existent. The to device
+     * may have an active gesture grab, so we need to keep the gesture class record
+     * around. */
 }
 
 /**
