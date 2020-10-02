@@ -87,6 +87,13 @@ typedef struct _EventQueue {
 
 static EventQueueRec miEventQueue;
 
+typedef struct {
+    void (*callback)(void*);
+    void* param;
+} CallbacksWhenDrained;
+
+static CallbackListPtr miCallbacksWhenDrained = NULL;
+
 static size_t
 mieqNumEnqueued(EventQueuePtr eventQueue)
 {
@@ -563,5 +570,21 @@ mieqProcessInputEvents(void)
 
     inProcessInputEvents = FALSE;
 
+    CallCallbacks(&miCallbacksWhenDrained, NULL);
+
+    input_unlock();
+}
+
+void mieqAddCallbackOnDrained(CallbackProcPtr callback, void* param)
+{
+    input_lock();
+    AddCallback(&miCallbacksWhenDrained, callback, param);
+    input_unlock();
+}
+
+void mieqRemoveCallbackOnDrained(CallbackProcPtr callback, void* param)
+{
+    input_lock();
+    DeleteCallback(&miCallbacksWhenDrained, callback, param);
     input_unlock();
 }
