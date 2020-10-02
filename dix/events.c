@@ -2529,6 +2529,46 @@ FixUpXI2DeviceEventFromWindow(SpritePtr pSprite, int evtype,
             (pSprite->hot.pScreen == pWin->drawable.pScreen);
 }
 
+static void
+FixUpXI2GesturePinchEventFromWindow(SpritePtr pSprite,
+                                    xXIGesturePinchEvent *event,
+                                    WindowPtr pWin, Window child)
+{
+    event->root = RootWindow(pSprite)->drawable.id;
+    event->event = pWin->drawable.id;
+
+    if (pSprite->hot.pScreen == pWin->drawable.pScreen) {
+        event->event_x = event->root_x - double_to_fp1616(pWin->drawable.x);
+        event->event_y = event->root_y - double_to_fp1616(pWin->drawable.y);
+        event->child = child;
+    }
+    else {
+        event->event_x = 0;
+        event->event_y = 0;
+        event->child = None;
+    }
+}
+
+static void
+FixUpXI2GestureSwipeEventFromWindow(SpritePtr pSprite,
+                                    xXIGestureSwipeEvent *event,
+                                    WindowPtr pWin, Window child)
+{
+    event->root = RootWindow(pSprite)->drawable.id;
+    event->event = pWin->drawable.id;
+
+    if (pSprite->hot.pScreen == pWin->drawable.pScreen) {
+        event->event_x = event->root_x - double_to_fp1616(pWin->drawable.x);
+        event->event_y = event->root_y - double_to_fp1616(pWin->drawable.y);
+        event->child = child;
+    }
+    else {
+        event->event_x = 0;
+        event->event_y = 0;
+        event->child = None;
+    }
+}
+
 /**
  * Adjust event fields to comply with the window properties.
  *
@@ -2562,6 +2602,18 @@ FixUpEventFromWindow(SpritePtr pSprite,
         case XI_BarrierHit:
         case XI_BarrierLeave:
             return;
+        case XI_GesturePinchBegin:
+        case XI_GesturePinchUpdate:
+        case XI_GesturePinchEnd:
+            FixUpXI2GesturePinchEventFromWindow(pSprite,
+                                                (xXIGesturePinchEvent*) xE, pWin, child);
+            break;
+        case XI_GestureSwipeBegin:
+        case XI_GestureSwipeUpdate:
+        case XI_GestureSwipeEnd:
+            FixUpXI2GestureSwipeEventFromWindow(pSprite,
+                                                (xXIGestureSwipeEvent*) xE, pWin, child);
+            break;
         default:
             FixUpXI2DeviceEventFromWindow(pSprite, evtype,
                                           (xXIDeviceEvent*) xE, pWin, child);
