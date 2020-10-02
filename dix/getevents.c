@@ -2062,6 +2062,7 @@ GetDixTouchEnd(InternalEvent *ievent, DeviceIntPtr dev, TouchPointInfoPtr ti,
     }
 }
 
+
 /**
  * Synthesize a single motion event for the core pointer.
  *

@@ -1328,6 +1328,15 @@ ComputeFreezes(void)
 
                 TouchListenerAcceptReject(replayDev, ti, 0, XIRejectTouch);
             }
+            else if (IsGestureEvent(event)) {
+                GestureInfoPtr gi =
+                    GestureFindByEventType(replayDev, event->any.type);
+                if (gi) {
+                    GestureEmitGestureEndToOwner(replayDev, gi);
+                    GestureEndGesture(gi);
+                }
+                ProcessGestureEvent(event, replayDev);
+            }
             else {
                 WindowPtr w = XYToWindow(replayDev->spriteInfo->sprite,
                                          event->device_event.root_x,
@@ -1498,6 +1507,41 @@ UpdateTouchesForGrab(DeviceIntPtr mouse)
 }
 
 /**
+ * Update gesture records when an explicit grab is activated. Any gestures owned
+ * by the grabbing client are updated so the listener state reflects the new
+ * grab.
+ */
+static void
+UpdateGesturesForGrab(DeviceIntPtr mouse)
+{
+    int i;
+
+    if (!mouse->gesture || mouse->deviceGrab.fromPassiveGrab)
+        return;
+
+    for (i = 0; i < mouse->gesture->num_gestures; i++) {
+        GestureInfoPtr gi = mouse->gesture->gestures + i;
+        GestureListener *listener = &gi->listener;
+        GrabPtr grab = mouse->deviceGrab.grab;
+
+        if (gi->active &&
+            CLIENT_BITS(listener->listener) == grab->resource) {
+            listener->listener = grab->resource;
+            listener->window = grab->window;
+
+            if (grab->grabtype == CORE || grab->grabtype == XI ||
+                !xi2mask_isset(grab->xi2mask, mouse, GetXI2Type(gi->type)))
+                listener->type = GESTURE_LISTENER_POINTER_GRAB;
+            else
+                listener->type = GESTURE_LISTENER_GRAB;
+            if (listener->grab)
+                FreeGrab(listener->grab);
+            listener->grab = AllocGrab(grab);
+        }
+    }
+}
+
+/**
  * Activate a pointer grab on the given device. A pointer grab will cause all
  * core pointer events of this device to be delivered to the grabbing client only.
  * No other device will send core events to the grab client while the grab is
@@ -1545,6 +1589,7 @@ ActivatePointerGrab(DeviceIntPtr mouse, GrabPtr grab,
     grabinfo->implicitGrab = autoGrab & ImplicitGrabMask;
     PostNewCursor(mouse);
     UpdateTouchesForGrab(mouse);
+    UpdateGesturesForGrab(mouse);
     CheckGrabForSyncs(mouse, (Bool) grab->pointerMode,
                       (Bool) grab->keyboardMode);
     if (oldgrab)
@@ -1600,6 +1645,16 @@ DeactivatePointerGrab(DeviceIntPtr mouse)
         if (dev->deviceGrab.sync.other == grab)
             dev->deviceGrab.sync.other = NullGrab;
     }
+
+    // in case of explicit gesture grab, send end event to the grab client
+    for (i = 0; !wasPassive && mouse->gesture && i < mouse->gesture->num_gestures; i++) {
+        GestureInfoPtr gi = mouse->gesture->gestures + i;
+        if (gi->active && GestureResourceIsOwner(gi, grab_resource)) {
+            GestureEmitGestureEndToOwner(mouse, gi);
+            GestureEndGesture(gi);
+        }
+    }
+
     DoEnterLeaveEvents(mouse, mouse->id, grab->window,
                        mouse->spriteInfo->sprite->win, NotifyUngrab);
     if (grab->confineTo)
