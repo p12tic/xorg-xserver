@@ -72,5 +72,6 @@ void xi2mask_set_one_mask(XI2Mask *xi2mask, int deviceid,
 const unsigned char *xi2mask_get_one_mask(const XI2Mask *xi2mask, int deviceid);
 
 Bool CopySprite(SpritePtr src, SpritePtr dst);
+void DeliverDeviceClassesChangedEvent(int sourceid, Time time);
 
 #endif
