@@ -1764,6 +1764,7 @@ ProcessGestureEvent(InternalEvent *ev, DeviceIntPtr dev)
     GestureInfoPtr gi;
     DeviceIntPtr kbd;
     Bool deactivateGestureGrab = FALSE;
+    Bool delivered = FALSE;
 
     if (!dev->gesture)
         return;
@@ -1793,7 +1794,11 @@ ProcessGestureEvent(InternalEvent *ev, DeviceIntPtr dev)
             GrabIsGestureGrab(dev->deviceGrab.grab))
         deactivateGestureGrab = TRUE;
 
-    DeliverGestureEventToOwner(dev, gi, ev);
+    delivered = DeliverGestureEventToOwner(dev, gi, ev);
+
+    if (delivered && !deactivateGestureGrab &&
+            (IsGestureBeginEvent(ev) || IsGestureEndEvent(ev)))
+        FreezeThisEventIfNeededForSyncGrab(dev, ev);
 
     if (IsGestureEndEvent(ev))
         GestureEndGesture(gi);
