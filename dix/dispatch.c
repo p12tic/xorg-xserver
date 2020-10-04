@@ -3473,6 +3473,7 @@ CloseDownClient(ClientPtr client)
             CallCallbacks((&ClientStateCallback), (void *) &clientinfo);
         }
         TouchListenerGone(client->clientAsMask);
+        GestureListenerGone(client->clientAsMask);
         FreeClientResources(client);
         /* Disable client ID tracking. This must be done after
          * ClientStateCallback. */

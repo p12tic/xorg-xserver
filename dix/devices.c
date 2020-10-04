@@ -285,7 +285,7 @@ AddInputDevice(ClientPtr client, DeviceProc deviceProc, Bool autoStart)
     dev->deviceGrab.grabTime = currentTime;
     dev->deviceGrab.ActivateGrab = ActivateKeyboardGrab;
     dev->deviceGrab.DeactivateGrab = DeactivateKeyboardGrab;
-    dev->deviceGrab.sync.event = calloc(1, sizeof(DeviceEvent));
+    dev->deviceGrab.sync.event = calloc(1, sizeof(InternalEvent));
 
     XkbSetExtension(dev, ProcessKeyboardEvent);
 
@@ -462,6 +462,7 @@ DisableDevice(DeviceIntPtr dev, BOOL sendevent)
         return FALSE;
 
     TouchEndPhysicallyActiveTouches(dev);
+    GestureEndActiveGestures(dev);
     ReleaseButtonsAndKeys(dev);
     SyncRemoveDeviceIdleTime(dev->idle_counter);
     dev->idle_counter = NULL;
@@ -1672,6 +1673,34 @@ InitTouchClassDeviceStruct(DeviceIntPtr device, unsigned int max_touches,
     free(touch);
 
     return FALSE;
+}
+
+/**
+ * Sets up gesture capabilities on @device.
+ *
+ * @max_touches The maximum number of simultaneous touches, or 0 for unlimited.
+ */
+Bool
+InitGestureClassDeviceStruct(DeviceIntPtr device, unsigned int max_touches)
+{
+    GestureClassPtr g;
+
+    BUG_RETURN_VAL(device == NULL, FALSE);
+    BUG_RETURN_VAL(device->gesture != NULL, FALSE);
+
+    g = calloc(1, sizeof(*g));
+    if (!g)
+        return FALSE;
+
+    g->sourceid = device->id;
+    g->max_touches = max_touches;
+    g->num_gestures = 2;
+    GestureInitGestureInfo(&g->gestures[0], ET_GesturePinchBegin);
+    GestureInitGestureInfo(&g->gestures[1], ET_GestureSwipeBegin);
+
+    device->gesture = g;
+
+    return TRUE;
 }
 
 /*

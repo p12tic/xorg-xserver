@@ -1304,7 +1304,6 @@ static void
 ComputeFreezes(void)
 {
     DeviceIntPtr replayDev = syncEvents.replayDev;
-    WindowPtr w;
     GrabPtr grab;
     DeviceIntPtr dev;
 
@@ -1316,26 +1315,38 @@ ComputeFreezes(void)
         return;
     syncEvents.playingEvents = TRUE;
     if (replayDev) {
-        DeviceEvent *event = replayDev->deviceGrab.sync.event;
+        InternalEvent *event = replayDev->deviceGrab.sync.event;
 
         syncEvents.replayDev = (DeviceIntPtr) NULL;
 
-        w = XYToWindow(replayDev->spriteInfo->sprite,
-                       event->root_x, event->root_y);
-        if (!CheckDeviceGrabs(replayDev, event, syncEvents.replayWin)) {
+        if (!CheckDeviceGrabs(replayDev, &event->device_event,
+                              syncEvents.replayWin)) {
             if (IsTouchEvent((InternalEvent *) event)) {
                 TouchPointInfoPtr ti =
-                    TouchFindByClientID(replayDev, event->touchid);
+                    TouchFindByClientID(replayDev, event->device_event.touchid);
                 BUG_WARN(!ti);
 
                 TouchListenerAcceptReject(replayDev, ti, 0, XIRejectTouch);
             }
-            else if (replayDev->focus &&
-                     !IsPointerEvent((InternalEvent *) event))
-                DeliverFocusedEvent(replayDev, (InternalEvent *) event, w);
-            else
-                DeliverDeviceEvents(w, (InternalEvent *) event, NullGrab,
-                                    NullWindow, replayDev);
+            else if (IsGestureEvent(event)) {
+                GestureInfoPtr gi =
+                    GestureFindByEventType(replayDev, event->any.type);
+                if (gi) {
+                    GestureEmitGestureEndToOwner(replayDev, gi);
+                    GestureEndGesture(gi);
+                }
+                ProcessGestureEvent(event, replayDev);
+            }
+            else {
+                WindowPtr w = XYToWindow(replayDev->spriteInfo->sprite,
+                                         event->device_event.root_x,
+                                         event->device_event.root_y);
+                if (replayDev->focus && !IsPointerEvent(event))
+                    DeliverFocusedEvent(replayDev, event, w);
+                else
+                    DeliverDeviceEvents(w, event, NullGrab,
+                                        NullWindow, replayDev);
+            }
         }
     }
     for (dev = inputInfo.devices; dev; dev = dev->next) {
@@ -1480,14 +1491,49 @@ UpdateTouchesForGrab(DeviceIntPtr mouse)
             CLIENT_BITS(listener->listener) == grab->resource) {
             listener->listener = grab->resource;
             listener->level = grab->grabtype;
-            listener->state = LISTENER_IS_OWNER;
+            listener->state = TOUCH_LISTENER_IS_OWNER;
             listener->window = grab->window;
 
             if (grab->grabtype == CORE || grab->grabtype == XI ||
                 !xi2mask_isset(grab->xi2mask, mouse, XI_TouchBegin))
-                listener->type = LISTENER_POINTER_GRAB;
+                listener->type = TOUCH_LISTENER_POINTER_GRAB;
             else
-                listener->type = LISTENER_GRAB;
+                listener->type = TOUCH_LISTENER_GRAB;
+            if (listener->grab)
+                FreeGrab(listener->grab);
+            listener->grab = AllocGrab(grab);
+        }
+    }
+}
+
+/**
+ * Update gesture records when an explicit grab is activated. Any gestures owned
+ * by the grabbing client are updated so the listener state reflects the new
+ * grab.
+ */
+static void
+UpdateGesturesForGrab(DeviceIntPtr mouse)
+{
+    int i;
+
+    if (!mouse->gesture || mouse->deviceGrab.fromPassiveGrab)
+        return;
+
+    for (i = 0; i < mouse->gesture->num_gestures; i++) {
+        GestureInfoPtr gi = mouse->gesture->gestures + i;
+        GestureListener *listener = &gi->listener;
+        GrabPtr grab = mouse->deviceGrab.grab;
+
+        if (gi->active &&
+            CLIENT_BITS(listener->listener) == grab->resource) {
+            listener->listener = grab->resource;
+            listener->window = grab->window;
+
+            if (grab->grabtype == CORE || grab->grabtype == XI ||
+                !xi2mask_isset(grab->xi2mask, mouse, GetXI2Type(gi->type)))
+                listener->type = GESTURE_LISTENER_POINTER_GRAB;
+            else
+                listener->type = GESTURE_LISTENER_GRAB;
             if (listener->grab)
                 FreeGrab(listener->grab);
             listener->grab = AllocGrab(grab);
@@ -1545,6 +1591,7 @@ ActivatePointerGrab(DeviceIntPtr mouse, GrabPtr grab,
     grabinfo->implicitGrab = autoGrab & ImplicitGrabMask;
     PostNewCursor(mouse);
     UpdateTouchesForGrab(mouse);
+    UpdateGesturesForGrab(mouse);
     CheckGrabForSyncs(mouse, (Bool) grab->pointerMode,
                       (Bool) grab->keyboardMode);
     if (oldgrab)
@@ -1583,7 +1630,7 @@ DeactivatePointerGrab(DeviceIntPtr mouse)
                  * ProcessTouchOwnershipEvent() will still call
                  * TouchEmitTouchEnd for this listener. The other half of
                  * this hack is in DeliverTouchEndEvent */
-                ti->listeners[0].state = LISTENER_HAS_END;
+                ti->listeners[0].state = TOUCH_LISTENER_HAS_END;
             }
             TouchListenerAcceptReject(mouse, ti, 0, mode);
         }
@@ -1600,6 +1647,16 @@ DeactivatePointerGrab(DeviceIntPtr mouse)
         if (dev->deviceGrab.sync.other == grab)
             dev->deviceGrab.sync.other = NullGrab;
     }
+
+    // in case of explicit gesture grab, send end event to the grab client
+    for (i = 0; !wasPassive && mouse->gesture && i < mouse->gesture->num_gestures; i++) {
+        GestureInfoPtr gi = mouse->gesture->gestures + i;
+        if (gi->active && GestureResourceIsOwner(gi, grab_resource)) {
+            GestureEmitGestureEndToOwner(mouse, gi);
+            GestureEndGesture(gi);
+        }
+    }
+
     DoEnterLeaveEvents(mouse, mouse->id, grab->window,
                        mouse->spriteInfo->sprite->win, NotifyUngrab);
     if (grab->confineTo)
@@ -1813,8 +1870,8 @@ AllowSome(ClientPtr client, TimeStamp time, DeviceIntPtr thisDev, int newState)
      * anything else is accept.
      */
     if (newState != NOT_GRABBED /* Replay */ &&
-        IsTouchEvent((InternalEvent*)grabinfo->sync.event)) {
-        TouchAcceptAndEnd(thisDev, grabinfo->sync.event->touchid);
+        IsTouchEvent(grabinfo->sync.event)) {
+        TouchAcceptAndEnd(thisDev, grabinfo->sync.event->device_event.touchid);
     }
 }
 
@@ -2502,6 +2559,75 @@ FindChildForEvent(SpritePtr pSprite, WindowPtr event)
     return child;
 }
 
+static void
+FixUpXI2DeviceEventFromWindow(SpritePtr pSprite, int evtype,
+                              xXIDeviceEvent *event, WindowPtr pWin, Window child)
+{
+    event->root = RootWindow(pSprite)->drawable.id;
+    event->event = pWin->drawable.id;
+
+    if (evtype == XI_TouchOwnership) {
+        event->child = child;
+        return;
+    }
+
+    if (pSprite->hot.pScreen == pWin->drawable.pScreen) {
+        event->event_x = event->root_x - double_to_fp1616(pWin->drawable.x);
+        event->event_y = event->root_y - double_to_fp1616(pWin->drawable.y);
+        event->child = child;
+    }
+    else {
+        event->event_x = 0;
+        event->event_y = 0;
+        event->child = None;
+    }
+
+    if (event->evtype == XI_Enter || event->evtype == XI_Leave ||
+        event->evtype == XI_FocusIn || event->evtype == XI_FocusOut)
+        ((xXIEnterEvent *) event)->same_screen =
+            (pSprite->hot.pScreen == pWin->drawable.pScreen);
+}
+
+static void
+FixUpXI2GesturePinchEventFromWindow(SpritePtr pSprite,
+                                    xXIGesturePinchEvent *event,
+                                    WindowPtr pWin, Window child)
+{
+    event->root = RootWindow(pSprite)->drawable.id;
+    event->event = pWin->drawable.id;
+
+    if (pSprite->hot.pScreen == pWin->drawable.pScreen) {
+        event->event_x = event->root_x - double_to_fp1616(pWin->drawable.x);
+        event->event_y = event->root_y - double_to_fp1616(pWin->drawable.y);
+        event->child = child;
+    }
+    else {
+        event->event_x = 0;
+        event->event_y = 0;
+        event->child = None;
+    }
+}
+
+static void
+FixUpXI2GestureSwipeEventFromWindow(SpritePtr pSprite,
+                                    xXIGestureSwipeEvent *event,
+                                    WindowPtr pWin, Window child)
+{
+    event->root = RootWindow(pSprite)->drawable.id;
+    event->event = pWin->drawable.id;
+
+    if (pSprite->hot.pScreen == pWin->drawable.pScreen) {
+        event->event_x = event->root_x - double_to_fp1616(pWin->drawable.x);
+        event->event_y = event->root_y - double_to_fp1616(pWin->drawable.y);
+        event->child = child;
+    }
+    else {
+        event->event_x = 0;
+        event->event_y = 0;
+        event->child = None;
+    }
+}
+
 /**
  * Adjust event fields to comply with the window properties.
  *
@@ -2520,8 +2646,6 @@ FixUpEventFromWindow(SpritePtr pSprite,
         child = FindChildForEvent(pSprite, pWin);
 
     if ((evtype = xi2_get_type(xE))) {
-        xXIDeviceEvent *event = (xXIDeviceEvent *) xE;
-
         switch (evtype) {
         case XI_RawKeyPress:
         case XI_RawKeyRelease:
@@ -2537,34 +2661,22 @@ FixUpEventFromWindow(SpritePtr pSprite,
         case XI_BarrierHit:
         case XI_BarrierLeave:
             return;
-        default:
+        case XI_GesturePinchBegin:
+        case XI_GesturePinchUpdate:
+        case XI_GesturePinchEnd:
+            FixUpXI2GesturePinchEventFromWindow(pSprite,
+                                                (xXIGesturePinchEvent*) xE, pWin, child);
             break;
+        case XI_GestureSwipeBegin:
+        case XI_GestureSwipeUpdate:
+        case XI_GestureSwipeEnd:
+            FixUpXI2GestureSwipeEventFromWindow(pSprite,
+                                                (xXIGestureSwipeEvent*) xE, pWin, child);
+            break;
+        default:
+            FixUpXI2DeviceEventFromWindow(pSprite, evtype,
+                                          (xXIDeviceEvent*) xE, pWin, child);
         }
-
-        event->root = RootWindow(pSprite)->drawable.id;
-        event->event = pWin->drawable.id;
-
-        if (evtype == XI_TouchOwnership) {
-            event->child = child;
-            return;
-        }
-
-        if (pSprite->hot.pScreen == pWin->drawable.pScreen) {
-            event->event_x = event->root_x - double_to_fp1616(pWin->drawable.x);
-            event->event_y = event->root_y - double_to_fp1616(pWin->drawable.y);
-            event->child = child;
-        }
-        else {
-            event->event_x = 0;
-            event->event_y = 0;
-            event->child = None;
-        }
-
-        if (event->evtype == XI_Enter || event->evtype == XI_Leave ||
-            event->evtype == XI_FocusIn || event->evtype == XI_FocusOut)
-            ((xXIEnterEvent *) event)->same_screen =
-                (pSprite->hot.pScreen == pWin->drawable.pScreen);
-
     }
     else {
         XE_KBPTR.root = RootWindow(pSprite)->drawable.id;
@@ -3663,7 +3775,6 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
                     InternalEvent *real_event)
 {
     SpritePtr pSprite = device->spriteInfo->sprite;
-    GrabInfoPtr grabinfo = &device->deviceGrab;
     xEvent *xE = NULL;
     int count;
     int rc;
@@ -3713,8 +3824,7 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
         }
     }
 
-    (*grabinfo->ActivateGrab) (device, grab,
-                               ClientTimeToServerTime(event->any.time), TRUE);
+    ActivateGrabNoDelivery(device, grab, event, real_event);
 
     if (xE) {
         FixUpEventFromWindow(pSprite, xE, grab->window, None, TRUE);
@@ -3725,12 +3835,29 @@ ActivatePassiveGrab(DeviceIntPtr device, GrabPtr grab, InternalEvent *event,
                         GetEventFilter(device, xE), grab);
     }
 
-    if (grabinfo->sync.state == FROZEN_NO_EVENT)
-        grabinfo->sync.state = FROZEN_WITH_EVENT;
-    *grabinfo->sync.event = real_event->device_event;
-
     free(xE);
     return TRUE;
+}
+
+/**
+ * Activates a grab without event delivery.
+ *
+ * @param device The device of the event to check.
+ * @param grab The grab to check.
+ * @param event The current device event.
+ * @param real_event The original event, in case of touch emulation. The
+ * real event is the one stored in the sync queue.
+ */
+void ActivateGrabNoDelivery(DeviceIntPtr dev, GrabPtr grab,
+                            InternalEvent *event, InternalEvent *real_event)
+{
+    GrabInfoPtr grabinfo = &dev->deviceGrab;
+    (*grabinfo->ActivateGrab) (dev, grab,
+                               ClientTimeToServerTime(event->any.time), TRUE);
+
+    if (grabinfo->sync.state == FROZEN_NO_EVENT)
+        grabinfo->sync.state = FROZEN_WITH_EVENT;
+    *grabinfo->sync.event = *real_event;
 }
 
 static BOOL
@@ -3971,6 +4098,15 @@ CheckPassiveGrabsOnWindow(WindowPtr pWin,
     return grab;
 }
 
+int FindFirstDescendandInSpriteTrace(DeviceIntPtr dev, WindowPtr ancestor)
+{
+    int i = 0;
+    while (i < dev->spriteInfo->sprite->spriteTraceGood)
+        if (dev->spriteInfo->sprite->spriteTrace[i++] == ancestor)
+            break;
+    return i;
+}
+
 /**
  * CheckDeviceGrabs handles both keyboard and pointer events that may cause
  * a passive grab to be activated.
@@ -4018,9 +4154,7 @@ CheckDeviceGrabs(DeviceIntPtr device, DeviceEvent *event, WindowPtr ancestor)
 
     i = 0;
     if (ancestor) {
-        while (i < device->spriteInfo->sprite->spriteTraceGood)
-            if (device->spriteInfo->sprite->spriteTrace[i++] == ancestor)
-                break;
+        i = FindFirstDescendandInSpriteTrace(device, ancestor);
         if (i == device->spriteInfo->sprite->spriteTraceGood)
             goto out;
     }
@@ -4235,7 +4369,6 @@ DeliverGrabbedEvent(InternalEvent *event, DeviceIntPtr thisDev,
     GrabPtr grab;
     GrabInfoPtr grabinfo;
     int deliveries = 0;
-    DeviceIntPtr dev;
     SpritePtr pSprite = thisDev->spriteInfo->sprite;
     BOOL sendCore = FALSE;
 
@@ -4283,28 +4416,38 @@ DeliverGrabbedEvent(InternalEvent *event, DeviceIntPtr thisDev,
          event->any.type == ET_KeyRelease ||
          event->any.type == ET_ButtonPress ||
          event->any.type == ET_ButtonRelease)) {
-        switch (grabinfo->sync.state) {
-        case FREEZE_BOTH_NEXT_EVENT:
-            dev = GetPairedDevice(thisDev);
-            if (dev) {
-                FreezeThaw(dev, TRUE);
-                if ((dev->deviceGrab.sync.state == FREEZE_BOTH_NEXT_EVENT) &&
-                    (CLIENT_BITS(grab->resource) ==
-                     CLIENT_BITS(dev->deviceGrab.grab->resource)))
-                    dev->deviceGrab.sync.state = FROZEN_NO_EVENT;
-                else
-                    dev->deviceGrab.sync.other = grab;
-            }
-            /* fall through */
-        case FREEZE_NEXT_EVENT:
-            grabinfo->sync.state = FROZEN_WITH_EVENT;
-            FreezeThaw(thisDev, TRUE);
-            *grabinfo->sync.event = event->device_event;
-            break;
-        }
+        FreezeThisEventIfNeededForSyncGrab(thisDev, event);
     }
 
     return deliveries;
+}
+
+void
+FreezeThisEventIfNeededForSyncGrab(DeviceIntPtr thisDev, InternalEvent* event)
+{
+    GrabInfoPtr grabinfo = &thisDev->deviceGrab;
+    GrabPtr grab = grabinfo->grab;
+    DeviceIntPtr dev;
+
+    switch (grabinfo->sync.state) {
+    case FREEZE_BOTH_NEXT_EVENT:
+        dev = GetPairedDevice(thisDev);
+        if (dev) {
+            FreezeThaw(dev, TRUE);
+            if ((dev->deviceGrab.sync.state == FREEZE_BOTH_NEXT_EVENT) &&
+                (CLIENT_BITS(grab->resource) ==
+                 CLIENT_BITS(dev->deviceGrab.grab->resource)))
+                dev->deviceGrab.sync.state = FROZEN_NO_EVENT;
+            else
+                dev->deviceGrab.sync.other = grab;
+        }
+        /* fall through */
+    case FREEZE_NEXT_EVENT:
+        grabinfo->sync.state = FROZEN_WITH_EVENT;
+        FreezeThaw(thisDev, TRUE);
+        *grabinfo->sync.event = *event;
+        break;
+    }
 }
 
 /* This function is used to set the key pressed or key released state -

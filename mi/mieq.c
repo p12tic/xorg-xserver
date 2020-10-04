@@ -87,6 +87,13 @@ typedef struct _EventQueue {
 
 static EventQueueRec miEventQueue;
 
+typedef struct {
+    void (*callback)(void*);
+    void* param;
+} CallbacksWhenDrained;
+
+static CallbackListPtr miCallbacksWhenDrained = NULL;
+
 static size_t
 mieqNumEnqueued(EventQueuePtr eventQueue)
 {
@@ -338,6 +345,14 @@ ChangeDeviceID(DeviceIntPtr dev, InternalEvent *event)
     case ET_BarrierLeave:
         event->barrier_event.deviceid = dev->id;
         break;
+    case ET_GesturePinchBegin:
+    case ET_GesturePinchUpdate:
+    case ET_GesturePinchEnd:
+    case ET_GestureSwipeBegin:
+    case ET_GestureSwipeUpdate:
+    case ET_GestureSwipeEnd:
+        event->gesture_event.deviceid = dev->id;
+        break;
     default:
         ErrorF("[mi] Unknown event type (%d), cannot change id.\n",
                event->any.type);
@@ -563,5 +578,21 @@ mieqProcessInputEvents(void)
 
     inProcessInputEvents = FALSE;
 
+    CallCallbacks(&miCallbacksWhenDrained, NULL);
+
+    input_unlock();
+}
+
+void mieqAddCallbackOnDrained(CallbackProcPtr callback, void* param)
+{
+    input_lock();
+    AddCallback(&miCallbacksWhenDrained, callback, param);
+    input_unlock();
+}
+
+void mieqRemoveCallbackOnDrained(CallbackProcPtr callback, void* param)
+{
+    input_lock();
+    DeleteCallback(&miCallbacksWhenDrained, callback, param);
     input_unlock();
 }

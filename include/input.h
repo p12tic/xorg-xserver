@@ -82,6 +82,10 @@ SOFTWARE.
 #define TOUCH_POINTER_EMULATED  (1 << 5)        /* touch event may be pointer emulated */
 #define TOUCH_END               (1 << 6)        /* really end this touch now */
 
+/* GetGestureEvent flags */
+#define GESTURE_REJECT          (1 << 0)
+#define GESTURE_CANCELLED       (1 << 1)
+
 /*int constants for pointer acceleration schemes*/
 #define PtrAccelNoOp            0
 #define PtrAccelPredictable     1
@@ -127,7 +131,9 @@ typedef struct _ValuatorClassRec *ValuatorClassPtr;
 typedef struct _ClassesRec *ClassesPtr;
 typedef struct _SpriteRec *SpritePtr;
 typedef struct _TouchClassRec *TouchClassPtr;
+typedef struct _GestureClassRec *GestureClassPtr;
 typedef struct _TouchPointInfo *TouchPointInfoPtr;
+typedef struct _GestureInfo *GestureInfoPtr;
 typedef struct _DDXTouchPointInfo *DDXTouchPointInfoPtr;
 typedef union _GrabMask GrabMask;
 
@@ -314,6 +320,9 @@ extern _X_EXPORT Bool InitTouchClassDeviceStruct(DeviceIntPtr /*device */ ,
                                                  unsigned int /*mode */ ,
                                                  unsigned int /*numAxes */ );
 
+extern _X_EXPORT Bool InitGestureClassDeviceStruct(DeviceIntPtr device,
+                                                   unsigned int max_touches);
+
 typedef void (*BellProcPtr) (int percent,
                              DeviceIntPtr device,
                              void *ctrl,
@@ -468,6 +477,33 @@ void QueueTouchEvents(DeviceIntPtr device,
                       uint32_t ddx_touchid,
                       int flags, const ValuatorMask *mask);
 
+void InitGestureEvent(InternalEvent *ievent, DeviceIntPtr dev, CARD32 ms,
+                      int type, uint16_t num_touches, uint32_t flags,
+                      double delta_x, double delta_y,
+                      double delta_unaccel_x, double delta_unaccel_y,
+                      double scale, double delta_angle);
+
+int GetGestureEvents(InternalEvent *events, DeviceIntPtr dev,
+                     uint16_t type, uint16_t num_touches, uint32_t flags,
+                     double delta_x, double delta_y,
+                     double delta_unaccel_x,
+                     double delta_unaccel_y,
+                     double scale, double delta_angle);
+
+
+void QueueGesturePinchEvents(DeviceIntPtr dev, uint16_t type,
+                             uint16_t num_touches, uint32_t flags,
+                             double delta_x, double delta_y,
+                             double delta_unaccel_x,
+                             double delta_unaccel_y,
+                             double scale, double delta_angle);
+
+void QueueGestureSwipeEvents(DeviceIntPtr dev, uint16_t type,
+                             uint16_t num_touches, uint32_t flags,
+                             double delta_x, double delta_y,
+                             double delta_unaccel_x,
+                             double delta_unaccel_y);
+
 extern int GetTouchOwnershipEvents(InternalEvent *events,
                                    DeviceIntPtr pDev,
                                    TouchPointInfoPtr ti,
@@ -535,20 +571,27 @@ extern _X_EXPORT InputAttributes *DuplicateInputAttributes(InputAttributes *
 extern _X_EXPORT void FreeInputAttributes(InputAttributes * attrs);
 
 enum TouchListenerState {
-    LISTENER_AWAITING_BEGIN = 0,   /**< Waiting for a TouchBegin event */
-    LISTENER_AWAITING_OWNER,       /**< Waiting for a TouchOwnership event */
-    LISTENER_EARLY_ACCEPT,         /**< Waiting for ownership, has already
-                                        accepted */
-    LISTENER_IS_OWNER,             /**< Is the current owner, hasn't accepted */
-    LISTENER_HAS_ACCEPTED,         /**< Is the current owner, has accepted */
-    LISTENER_HAS_END,              /**< Has already received the end event */
+    TOUCH_LISTENER_AWAITING_BEGIN = 0, /**< Waiting for a TouchBegin event */
+    TOUCH_LISTENER_AWAITING_OWNER,     /**< Waiting for a TouchOwnership event */
+    TOUCH_LISTENER_EARLY_ACCEPT,       /**< Waiting for ownership, has already
+                                            accepted */
+    TOUCH_LISTENER_IS_OWNER,           /**< Is the current owner, hasn't
+                                            accepted */
+    TOUCH_LISTENER_HAS_ACCEPTED,       /**< Is the current owner, has accepted */
+    TOUCH_LISTENER_HAS_END,            /**< Has already received the end event */
 };
 
 enum TouchListenerType {
-    LISTENER_GRAB,
-    LISTENER_POINTER_GRAB,
-    LISTENER_REGULAR,
-    LISTENER_POINTER_REGULAR,
+    TOUCH_LISTENER_GRAB,
+    TOUCH_LISTENER_POINTER_GRAB,
+    TOUCH_LISTENER_REGULAR,
+    TOUCH_LISTENER_POINTER_REGULAR,
+};
+
+enum GestureListenerType {
+    GESTURE_LISTENER_GRAB,
+    GESTURE_LISTENER_POINTER_GRAB,
+    GESTURE_LISTENER_REGULAR
 };
 
 extern void TouchInitDDXTouchPoint(DeviceIntPtr dev,
@@ -593,10 +636,24 @@ extern int TouchListenerAcceptReject(DeviceIntPtr dev, TouchPointInfoPtr ti,
 extern int TouchAcceptReject(ClientPtr client, DeviceIntPtr dev, int mode,
                              uint32_t touchid, Window grab_window, XID *error);
 extern void TouchEndPhysicallyActiveTouches(DeviceIntPtr dev);
-extern void TouchDeliverDeviceClassesChangedEvent(TouchPointInfoPtr ti,
-                                                  Time time, XID resource);
 extern void TouchEmitTouchEnd(DeviceIntPtr dev, TouchPointInfoPtr ti, int flags, XID resource);
 extern void TouchAcceptAndEnd(DeviceIntPtr dev, int touchid);
+
+extern Bool GestureInitGestureInfo(GestureInfoPtr gesture, int type);
+extern GestureInfoPtr GestureBeginGesture(DeviceIntPtr dev, InternalEvent *ev);
+extern GestureInfoPtr GestureFindByEventType(DeviceIntPtr dev, int type);
+extern void GestureEndGesture(GestureInfoPtr gi);
+extern Bool GestureResourceIsOwner(GestureInfoPtr gi, XID resource);
+extern void GestureAddListener(GestureInfoPtr gi, XID resource, int resource_type,
+                               enum GestureListenerType type,
+                               WindowPtr window, GrabPtr grab);
+extern void GestureSetupListener(DeviceIntPtr dev, GestureInfoPtr gi,
+                                 InternalEvent *ev);
+extern Bool GestureBuildSprite(DeviceIntPtr sourcedev, GestureInfoPtr gi);
+extern void GestureListenerGone(XID resource);
+extern void GestureEndActiveGestures(DeviceIntPtr dev);
+extern void GestureEmitGestureEndToOwner(DeviceIntPtr dev, GestureInfoPtr gi);
+extern void ProcessGestureEvent(InternalEvent *ev, DeviceIntPtr dev);
 
 /* misc event helpers */
 extern Mask GetEventMask(DeviceIntPtr dev, xEvent *ev, InputClientsPtr clients);
@@ -611,6 +668,9 @@ extern WindowPtr XYToWindow(SpritePtr pSprite, int x, int y);
 extern int EventIsDeliverable(DeviceIntPtr dev, int evtype, WindowPtr win);
 extern Bool ActivatePassiveGrab(DeviceIntPtr dev, GrabPtr grab,
                                 InternalEvent *ev, InternalEvent *real_event);
+extern void ActivateGrabNoDelivery(DeviceIntPtr dev, GrabPtr grab,
+                                   InternalEvent *event,
+                                   InternalEvent *real_event);
 /**
  * Masks specifying the type of event to deliver for an InternalEvent; used
  * by EventIsDeliverable.

@@ -426,6 +426,10 @@ DeliverTouchEvents(DeviceIntPtr /* dev */ ,
                    InternalEvent * /* ev */ ,
                    XID /* resource */ );
 
+extern Bool
+DeliverGestureEventToOwner(DeviceIntPtr dev, GestureInfoPtr gi,
+                           InternalEvent *ev);
+
 extern void
 InitializeSprite(DeviceIntPtr /* pDev */ ,
                  WindowPtr /* pWin */ );
@@ -438,6 +442,9 @@ UpdateSpriteForScreen(DeviceIntPtr /* pDev */ ,
 
 extern _X_EXPORT void
 WindowHasNewCursor(WindowPtr /* pWin */ );
+
+extern int
+FindFirstDescendandInSpriteTrace(DeviceIntPtr dev, WindowPtr ancestor);
 
 extern Bool
 CheckDeviceGrabs(DeviceIntPtr /* device */ ,
@@ -453,6 +460,10 @@ extern int
 DeliverGrabbedEvent(InternalEvent * /* event */ ,
                     DeviceIntPtr /* thisDev */ ,
                     Bool /* deactivateGrab */ );
+
+extern void
+FreezeThisEventIfNeededForSyncGrab(DeviceIntPtr thisDev,
+                                     InternalEvent* event);
 
 extern void
 FixKeyState(DeviceEvent * /* event */ ,
@@ -611,6 +622,13 @@ extern Bool
 IsPointerEvent(InternalEvent *event);
 extern Bool
 IsTouchEvent(InternalEvent *event);
+Bool
+IsGestureEvent(InternalEvent *event);
+Bool
+IsGestureBeginEvent(InternalEvent *event);
+Bool
+IsGestureEndEvent(InternalEvent *event);
+
 extern _X_EXPORT Bool
 IsMaster(DeviceIntPtr dev);
 extern _X_EXPORT Bool
